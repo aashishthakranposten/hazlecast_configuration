@@ -1,0 +1,132 @@
+<hazelcast.version>3.12.5</hazelcast.version>
+ 
+ 
+ 
+<dependency>
+    <groupId>com.hazelcast</groupId>
+    <artifactId>hazelcast</artifactId>
+</dependency>
+<dependency>
+    <groupId>com.hazelcast</groupId>
+    <artifactId>hazelcast-spring</artifactId>
+</dependency>
+ 
+ 
+import com.hazelcast.config.Config;
+import com.hazelcast.config.EvictionPolicy;
+import com.hazelcast.config.MapConfig;
+import com.hazelcast.config.MaxSizeConfig;
+import com.vz.cpi.plugins.cache.configuration.CacheProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.*;
+
+@Configuration
+@EnableCaching
+@PropertySource(value = {"classpath:cpi-cache.properties"})
+@ComponentScan("com.vz.cpi.plugins.cache")
+@ConditionalOnProperty(name = "cpi.plugins.cache", havingValue = "true")
+public class CachePluginConfiguration {
+
+    @Bean
+    @ConfigurationProperties(prefix = "cache")
+    public CacheProperties cacheProperties() {
+        return new CacheProperties();
+    }
+
+    /**
+     * This method is used to configure in-memory hazelcast cache.
+     *
+     * @return
+     */
+    @Bean
+    @Primary
+    public Config defaultCacheManager() {
+        return new Config().setInstanceName(cacheProperties().getDefaultCache().getInstanceName())
+                .addMapConfig(new MapConfig().setName(cacheProperties().getDefaultCache().getName())
+                        .setMaxSizeConfig(new MaxSizeConfig(cacheProperties().getDefaultCache().getSize(), MaxSizeConfig.MaxSizePolicy.FREE_HEAP_SIZE))
+                        .setEvictionPolicy(EvictionPolicy.LRU)
+                        .setTimeToLiveSeconds(cacheProperties().getDefaultCache().getTimeToLive()));
+    }
+}
+ 
+ 
+import com.hazelcast.config.Config;
+import com.hazelcast.config.EvictionPolicy;
+import com.hazelcast.config.MapConfig;
+import com.hazelcast.config.MaxSizeConfig;
+import com.vz.cpi.plugins.cache.dto.CacheConfigurerDto;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.collections4.CollectionUtils;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
+import org.springframework.context.ConfigurableApplicationContext;
+
+import javax.annotation.PostConstruct;
+import java.util.List;
+
+@Getter
+@Setter
+public final class CacheProperties implements ApplicationContextAware {
+
+    private ApplicationContext applicationContext;
+    private CacheConfigurerDto defaultCache;
+    private List<CacheConfigurerDto> custom;
+
+    @PostConstruct
+    public void postInit() {
+        ConfigurableApplicationContext configurableApplicationContext = (ConfigurableApplicationContext) applicationContext;
+        postProcessBeanFactory(configurableApplicationContext.getBeanFactory());
+    }
+
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+        if(CollectionUtils.isNotEmpty(this.getCustom())) {
+            this.getCustom().forEach(customCache -> {
+                beanFactory.registerSingleton(customCache.getName(), cacheRegistration(customCache));
+            });
+        }
+    }
+
+    private Config cacheRegistration(CacheConfigurerDto cache) {
+        return new Config().setInstanceName(cache.getInstanceName())
+                .addMapConfig(new MapConfig().setName(cache.getName())
+                        .setMaxSizeConfig(new MaxSizeConfig(cache.getSize(), MaxSizeConfig.MaxSizePolicy.FREE_HEAP_SIZE))
+                        .setEvictionPolicy(EvictionPolicy.LRU)
+                        .setTimeToLiveSeconds(cache.getTimeToLive()));
+    }
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
+    }
+}
+ 
+ 
+cache.defaultCache.instanceName=cpi-cache-instance
+cache.defaultCache.name=cpi-cache
+cache.defaultCache.size=50
+cache.defaultCache.time-to-live=2000
+ 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.io.Serializable;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class CacheConfigurerDto implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+    private String instanceName;
+    private String name;
+    private Integer size;
+    private Integer timeToLive;
+}
